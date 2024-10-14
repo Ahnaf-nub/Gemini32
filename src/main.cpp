@@ -18,7 +18,7 @@ Adafruit_MPU6050 mpu;
 char keyboard[4][10] = {
   {'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'},
   {'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', '?'},
-  {'Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/'},
+  {'Z', 'X', 'C', 'V', 'B', 'N', 'M', ' ', '.', '/'}, // ' ' represents space key
   {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'}
 };
 
@@ -27,6 +27,12 @@ int cursorX = 0;  // Cursor position (column)
 int cursorY = 0;  // Cursor position (row)
 int previousX = 0;  // To track previous position and avoid redundant redraw
 int previousY = 0;
+
+// Define GPIO for pushbutton
+#define BUTTON_PIN 23  // GPIO 23 for button input
+unsigned long buttonPressTime = 0;  // To track how long the button is held
+bool buttonHeld = false;
+bool textEntered = false;  // Flag to ensure text is entered only once
 
 // Draw the keyboard layout on the OLED
 void drawKeyboard() {
@@ -66,16 +72,21 @@ void clearCursor(int x, int y) {
 void displayInputText() {
   display.fillRect(0, 0, SCREEN_WIDTH, 16, SH110X_BLACK);  // Clear only the input text area
   display.setCursor(0, 0);  // Start at the top
-  display.print("Input: ");
+  display.print("You: ");
   display.print(inputText);  // Print current input text
   display.display();  // Render the updated input text
 }
 
-// Add a function for selecting text by pressing a button or gesture
+// Function to select the current key
 void selectKey() {
   char selectedKey = keyboard[cursorY][cursorX];  // Get the current key under the cursor
   inputText += selectedKey;  // Append the selected key to the input text
   displayInputText();  // Update the displayed input text
+}
+
+// Function to print the whole text inputted by the user
+void enterText() {
+  Serial.println("Final entered text: " + inputText);  // Output the final entered text to Serial Monitor
 }
 
 // Update cursor position visually
@@ -89,25 +100,26 @@ void updateCursorPosition(int x, int y) {
 
 // Function to handle MPU6050 tilt input for cursor navigation
 void handleMPUInput(sensors_event_t a) {
-  const float threshold = 3.5;  // Set the tilt sensitivity threshold
+  const float thresholdy = 3.5;  // Set the tilt sensitivity threshold
+  const float thresholdx = 4.5;  // Set the tilt sensitivity threshold
 
   static unsigned long lastMoveTime = 0;
-  const int moveDelay = 200;  // Delay in milliseconds to slow down the cursor movement
+  const int moveDelay = 300;  // Delay in milliseconds to slow down the cursor movement
 
   // Only move if enough time has passed since the last move
   if (millis() - lastMoveTime > moveDelay) {
-    if (a.acceleration.x > threshold) {
+    if (a.acceleration.x > thresholdy) {
       cursorY++;
       if (cursorY >= 4) cursorY = 3;  // Prevent overflow
-    } else if (a.acceleration.x < -threshold) {
+    } else if (a.acceleration.x < -thresholdy) {
       cursorY--;
       if (cursorY < 0) cursorY = 0;  // Prevent underflow
     }
-    if (a.acceleration.y < threshold) {
-      cursorX++;
-      if (cursorX >= 10) cursorX = 9;  // Prevent overflow
-    } else if (a.acceleration.y > -threshold) {
+    if (a.acceleration.y > thresholdx) {
       cursorX--;
+      if (cursorX >= 10) cursorX = 9;  // Prevent overflow
+    } else if (a.acceleration.y < -thresholdx) {
+      cursorX++;
       if (cursorX < 0) cursorX = 0;  // Prevent underflow
     }
 
@@ -119,8 +131,37 @@ void handleMPUInput(sensors_event_t a) {
   }
 }
 
+// Function to check button state
+void checkButton() {
+  bool buttonState = digitalRead(BUTTON_PIN);  // Read button state
+
+  if (buttonState == LOW) {  // Button pressed
+    if (!buttonHeld) {  // If the button is newly pressed
+      buttonPressTime = millis();  // Record the time it was pressed
+      buttonHeld = true;  // Mark as held
+    }
+
+    // If the button is held for more than 5 seconds, enter the text once
+    if (millis() - buttonPressTime > 5000 && !textEntered) {
+      enterText();  // Print the final text
+      inputText = "";  // Clear the input text after entry
+      displayInputText();  // Refresh the display
+      textEntered = true;  // Ensure text is entered only once
+    }
+  } else {  // Button released
+    if (buttonHeld && millis() - buttonPressTime < 5000) {  // Short press
+      selectKey();  // Select the current key if pressed briefly
+    }
+    buttonHeld = false;  // Reset button held state
+    textEntered = false;  // Reset the textEntered flag after releasing the button
+  }
+}
+
 void setup() {
   Serial.begin(9600);
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);  // Initialize the button pin as input with pullup
+
   if (!display.begin(0x3C, true)) {
     Serial.println("Display initialization failed!");
     while (1);
@@ -132,11 +173,11 @@ void setup() {
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
-  
+
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SH110X_WHITE);
-  
+
   drawKeyboard();  // Draw the initial keyboard layout
   drawCursor(cursorX, cursorY);  // Draw the cursor at the starting position
   displayInputText();  // Draw the input text area
@@ -146,9 +187,8 @@ void loop() {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
-  // Process accelerometer data for cursor movement
   handleMPUInput(a);
+  checkButton();
 
-  // Add more input-handling logic here (e.g., button press to select keys)
   delay(100);  // Small delay for smoother display
 }
