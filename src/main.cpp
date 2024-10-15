@@ -1,17 +1,28 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 
-// Define display dimensions
+// Define WiFi credentials
+const char* ssid = "Mahir";
+const char* password = "Ahnaf2007";
+
+// Define API Key and other constants
+const char* API_KEY = "AIzaSyCaepy-tFgUFmhAYcL1oXEGoynCdjMxtSo";
+const char* MAX_TOKENS = "100";
+
+// Define OLED display dimensions
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 
-// Create an SH1106 display object
+// Create SH1106 display object
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire);
 
-// MPU6050 object
+// MPU6050 object for accelerometer
 Adafruit_MPU6050 mpu;
 
 // Keyboard layout
@@ -22,27 +33,76 @@ char keyboard[4][10] = {
   {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'}
 };
 
-String inputText = "";  // Stores the input text
-int cursorX = 0;  // Cursor position (column)
-int cursorY = 0;  // Cursor position (row)
-int previousX = 0;  // To track previous position and avoid redundant redraw
+// Variables to store input text
+String inputText = "";  
+int cursorX = 0;  
+int cursorY = 0;  
+int previousX = 0;
 int previousY = 0;
 
-// Define GPIO for pushbutton
-#define BUTTON_PIN 23  // GPIO 23 for button input
-unsigned long buttonPressTime = 0;  // To track how long the button is held
+// Button pin and states
+#define BUTTON_PIN 23
+unsigned long buttonPressTime = 0;
 bool buttonHeld = false;
-bool textEntered = false;  // Flag to ensure text is entered only once
+bool textEntered = false; 
 
-// Draw the keyboard layout on the OLED
+// Initialize WiFi
+void initWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print('.');
+    delay(1000);
+  }
+  Serial.println(WiFi.localIP());
+}
+
+// Send text to Gemini API and display response on OLED
+void sendToGeminiAPI(String userInput) {
+  HTTPClient https;
+  
+  // Construct API URL
+  if (https.begin("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + (String)API_KEY)) {
+    https.addHeader("Content-Type", "application/json");
+    
+    // Prepare JSON payload
+    String payload = "{\"contents\": [{\"parts\":[{\"text\":" + userInput + "}]}],\"generationConfig\": {\"maxOutputTokens\": " + (String)MAX_TOKENS + "}}";
+    int httpCode = https.POST(payload);
+
+    if (httpCode == HTTP_CODE_OK) {
+      String response = https.getString();
+      DynamicJsonDocument doc(2048);
+      deserializeJson(doc, response);
+
+      // Extract the response from the API
+      String answer = doc["candidates"][0]["content"]["parts"][0]["text"];
+      
+      // Display the response on OLED
+      display.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SH110X_BLACK);  // Clear display
+      display.setCursor(0, 0);
+      display.print("AI: ");
+      display.println(answer);
+      display.display();
+      
+      Serial.println("Gemini AI Response: " + answer);
+    } else {
+      Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
+    }
+    https.end();
+  } else {
+    Serial.printf("[HTTPS] Unable to connect\n");
+  }
+}
+
+// Draw keyboard on the OLED
 void drawKeyboard() {
   int xOffset = 0;
-  int yOffset = 20;  // Offset to start drawing keyboard below the input text area
+  int yOffset = 20;
 
-  // Loop through the keyboard array and draw keys
   for (int row = 0; row < 4; row++) {
     for (int col = 0; col < 10; col++) {
-      display.setCursor(xOffset + col * 12, yOffset + row * 12);  // Adjust key spacing
+      display.setCursor(xOffset + col * 12, yOffset + row * 12); 
       display.print(keyboard[row][col]);
     }
   }
@@ -50,63 +110,39 @@ void drawKeyboard() {
 
 // Draw the cursor at the specified position
 void drawCursor(int x, int y) {
-  int cursorXPos = x * 12;  // Horizontal cursor position
-  int cursorYPos = 20 + y * 12;  // Vertical cursor position (offset by the input text space)
+  int cursorXPos = x * 12;
+  int cursorYPos = 20 + y * 12;
 
-  // Draw a small rectangle around the current key to represent the cursor
   display.drawRect(cursorXPos, cursorYPos, 12, 12, SH110X_WHITE);
 }
 
 // Clear the cursor from its previous position
 void clearCursor(int x, int y) {
-  int cursorXPos = x * 12;  // Horizontal cursor position
-  int cursorYPos = 20 + y * 12;  // Vertical cursor position (offset by the input text space)
+  int cursorXPos = x * 12;
+  int cursorYPos = 20 + y * 12;
 
-  // Clear the rectangle where the cursor was by redrawing the key
-  display.fillRect(cursorXPos, cursorYPos, 12, 12, SH110X_BLACK);  // Clear the box
+  display.fillRect(cursorXPos, cursorYPos, 12, 12, SH110X_BLACK);
   display.setCursor(cursorXPos, cursorYPos);
-  display.print(keyboard[y][x]);  // Redraw the key itself
+  display.print(keyboard[y][x]);
 }
 
-// Update only the input text when it changes
-void displayInputText() {
-  display.fillRect(0, 0, SCREEN_WIDTH, 16, SH110X_BLACK);  // Clear only the input text area
-  display.setCursor(0, 0);  // Start at the top
-  display.print("You: ");
-  display.print(inputText);  // Print current input text
-  display.display();  // Render the updated input text
-}
-
-// Function to select the current key
-void selectKey() {
-  char selectedKey = keyboard[cursorY][cursorX];  // Get the current key under the cursor
-  inputText += selectedKey;  // Append the selected key to the input text
-  displayInputText();  // Update the displayed input text
-}
-
-// Function to print the whole text inputted by the user
-void enterText() {
-  Serial.println("Final entered text: " + inputText);  // Output the final entered text to Serial Monitor
-}
-
-// Update cursor position visually
+// Update the cursor visually
 void updateCursorPosition(int x, int y) {
-  clearCursor(previousX, previousY);  // Clear old cursor position
-  drawCursor(x, y);  // Draw new cursor
-  display.display();  // Refresh display
-  previousX = x;  // Update previous position
+  clearCursor(previousX, previousY);
+  drawCursor(x, y);
+  display.display();
+  previousX = x;
   previousY = y;
 }
 
-// Function to handle MPU6050 tilt input for cursor navigation
+// Handle MPU6050 input to move the cursor
 void handleMPUInput(sensors_event_t a) {
-  const float thresholdy = 3.5;  // Set the tilt sensitivity threshold
-  const float thresholdx = 4.5;  // Set the tilt sensitivity threshold
+  const float thresholdy = 3.5;
+  const float thresholdx = 4.5;
 
   static unsigned long lastMoveTime = 0;
-  const int moveDelay = 300;  // Delay in milliseconds to slow down the cursor movement
+  const int moveDelay = 300;
 
-  // Only move if enough time has passed since the last move
   if (millis() - lastMoveTime > moveDelay) {
     if (a.acceleration.x > thresholdy) {
       cursorY++;
@@ -123,53 +159,67 @@ void handleMPUInput(sensors_event_t a) {
       if (cursorX < 0) cursorX = 0;  // Prevent underflow
     }
 
-    // If the cursor moved, update its position
     if (cursorX != previousX || cursorY != previousY) {
       updateCursorPosition(cursorX, cursorY);
-      lastMoveTime = millis();  // Update the last move time
+      lastMoveTime = millis();
     }
   }
 }
 
-// Function to check button state
+// Select the key under the cursor
+void selectKey() {
+  char selectedKey = keyboard[cursorY][cursorX];
+  inputText += selectedKey;
+
+  // Display the input text on OLED (or clear for AI response)
+  display.fillRect(0, 0, SCREEN_WIDTH, 16, SH110X_BLACK);
+  display.setCursor(0, 0);
+  display.print("You: ");
+  display.print(inputText);
+  display.display();
+}
+
+// Handle button press to send text
 void checkButton() {
-  bool buttonState = digitalRead(BUTTON_PIN);  // Read button state
+  bool buttonState = digitalRead(BUTTON_PIN);
 
-  if (buttonState == LOW) {  // Button pressed
-    if (!buttonHeld) {  // If the button is newly pressed
-      buttonPressTime = millis();  // Record the time it was pressed
-      buttonHeld = true;  // Mark as held
+  if (buttonState == LOW) {  
+    if (!buttonHeld) {
+      buttonPressTime = millis();
+      buttonHeld = true;
     }
 
-    // If the button is held for more than 5 seconds, enter the text once
     if (millis() - buttonPressTime > 5000 && !textEntered) {
-      enterText();  // Print the final text
-      inputText = "";  // Clear the input text after entry
-      displayInputText();  // Refresh the display
-      textEntered = true;  // Ensure text is entered only once
+      sendToGeminiAPI("\"" + inputText + "\"");  // Send input to API
+      inputText = "";  // Clear input after sending
+      textEntered = true;
     }
-  } else {  // Button released
-    if (buttonHeld && millis() - buttonPressTime < 5000) {  // Short press
-      selectKey();  // Select the current key if pressed briefly
+  } else {  
+    if (buttonHeld && millis() - buttonPressTime < 5000) {
+      selectKey();  
     }
-    buttonHeld = false;  // Reset button held state
-    textEntered = false;  // Reset the textEntered flag after releasing the button
+    buttonHeld = false;  
+    textEntered = false;
   }
 }
 
 void setup() {
   Serial.begin(9600);
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);  // Initialize the button pin as input with pullup
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  initWiFi();
 
   if (!display.begin(0x3C, true)) {
     Serial.println("Display initialization failed!");
     while (1);
   }
+
   if (!mpu.begin()) {
     Serial.println("MPU6050 initialization failed!");
     while (1);
   }
+
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
@@ -178,9 +228,8 @@ void setup() {
   display.setTextSize(1);
   display.setTextColor(SH110X_WHITE);
 
-  drawKeyboard();  // Draw the initial keyboard layout
-  drawCursor(cursorX, cursorY);  // Draw the cursor at the starting position
-  displayInputText();  // Draw the input text area
+  drawKeyboard();
+  drawCursor(cursorX, cursorY);
 }
 
 void loop() {
@@ -190,5 +239,5 @@ void loop() {
   handleMPUInput(a);
   checkButton();
 
-  delay(100);  // Small delay for smoother display
+  delay(100);  
 }
