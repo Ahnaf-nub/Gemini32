@@ -137,24 +137,23 @@ void updateCursorPosition(int x, int y) {
 
 // Handle MPU6050 input to move the cursor
 void handleMPUInput(sensors_event_t a) {
-  const float thresholdy = 3.5;
-  const float thresholdx = 4.5;
+  const float threshold = 3.5;
 
   static unsigned long lastMoveTime = 0;
   const int moveDelay = 300;
 
   if (millis() - lastMoveTime > moveDelay) {
-    if (a.acceleration.x > thresholdy) {
+    if (a.acceleration.x > threshold) {
       cursorY++;
       if (cursorY >= 4) cursorY = 3;  // Prevent overflow
-    } else if (a.acceleration.x < -thresholdy) {
+    } else if (a.acceleration.x < -threshold) {
       cursorY--;
       if (cursorY < 0) cursorY = 0;  // Prevent underflow
     }
-    if (a.acceleration.y > thresholdx) {
+    if (a.acceleration.y > threshold) {
       cursorX--;
       if (cursorX >= 10) cursorX = 9;  // Prevent overflow
-    } else if (a.acceleration.y < -thresholdx) {
+    } else if (a.acceleration.y < -threshold) {
       cursorX++;
       if (cursorX < 0) cursorX = 0;  // Prevent underflow
     }
