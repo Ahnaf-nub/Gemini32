@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
@@ -47,6 +48,7 @@ int scrollOffset = 0;
 // Button pin and states
 #define BUTTON_PIN_SELECT 23
 #define BUTTON_PIN_SEND 12
+
 bool buttonHeldSelect = false;
 bool buttonHeldSend = false;
 bool responseDisplayed = false;
@@ -63,6 +65,25 @@ void initWiFi() {
   Serial.println(WiFi.localIP());
 }
 
+void displayAIResponse() {
+  display.clearDisplay();
+  
+  int textHeight = ((aiResponse.length() / 21) + 1) * 8; // Estimate height based on length and line wrap
+  int maxScrollOffset = max(0, textHeight - SCREEN_HEIGHT);
+
+  // Constrain scrollOffset within limits
+  scrollOffset = constrain(scrollOffset, 0, maxScrollOffset);
+
+  // Set cursor for scrolling text
+  display.setCursor(0, -scrollOffset);  // Adjust starting position
+
+  display.setTextWrap(true);
+  display.print("AI: ");
+  display.println(aiResponse);
+
+  display.display();
+}
+
 // Send text to Gemini API and display response on OLED
 void sendToGeminiAPI(String userInput) {
   HTTPClient https;
@@ -72,15 +93,14 @@ void sendToGeminiAPI(String userInput) {
     
     String payload = "{\"contents\": [{\"parts\":[{\"text\":\"" + userInput + "\"}]}],\"generationConfig\": {\"maxOutputTokens\": " + (String)MAX_TOKENS + "}}";
     int httpCode = https.POST(payload);
-
     if (httpCode == HTTP_CODE_OK) {
       String response = https.getString();
       DynamicJsonDocument doc(2048);
       deserializeJson(doc, response);
-
-      aiResponse = doc["candidates"][0]["content"].as<String>();
+    
+      aiResponse = doc["candidates"][0]["content"]["parts"][0]["text"].as<String>();
       scrollOffset = 0;  // Reset scroll offset for new response
-
+    
       displayAIResponse();
       responseDisplayed = true;
       Serial.println("Gemini AI Response: " + aiResponse);
@@ -91,16 +111,6 @@ void sendToGeminiAPI(String userInput) {
   } else {
     Serial.printf("[HTTPS] Unable to connect\n");
   }
-}
-
-// Display AI response with current scroll offset
-void displayAIResponse() {
-  display.clearDisplay();
-  display.setCursor(0, -scrollOffset);
-  display.setTextWrap(true);  // Allow text to wrap to next line
-  display.print("AI: ");
-  display.println(aiResponse);
-  display.display();
 }
 
 // Draw keyboard on the OLED
@@ -114,13 +124,13 @@ void drawKeyboard() {
       display.print(keyboard[row][col]);
     }
   }
+  display.display(); // Ensure display refresh after drawing the keyboard
 }
 
 // Draw the cursor at the specified position
 void drawCursor(int x, int y) {
   int cursorXPos = x * 12;
   int cursorYPos = 20 + y * 12;
-
   display.drawRect(cursorXPos, cursorYPos, 12, 12, SH110X_WHITE);
 }
 
@@ -143,24 +153,29 @@ void updateCursorPosition(int x, int y) {
   previousY = y;
 }
 
-// Handle MPU6050 input to move the cursor
+// Handle MPU6050 input to move the cursor or scroll
 void handleMPUInput(sensors_event_t a, sensors_event_t g) {
   const float threshold = 3.5;
   static unsigned long lastMoveTime = 0;
   const int moveDelay = 200;
 
-  // Handle scrolling for AI response
   if (responseDisplayed) {
-    const float scrollThreshold = 5.0;  // Gyro sensitivity for scrolling
+    const float scrollThreshold = 0.2;
 
-    if (g.gyro.z > scrollThreshold) {  // Scroll down
-      scrollOffset += 10;
-    } else if (g.gyro.z < -scrollThreshold) {  // Scroll up
-      scrollOffset -= 10;
+    // Track if the scrollOffset changes to trigger a display update
+    int previousOffset = scrollOffset;
+
+    if (g.gyro.z > scrollThreshold) {
+      scrollOffset += 20;
+    } else if (g.gyro.z < -scrollThreshold) {
+      scrollOffset -= 20;
     }
 
-    scrollOffset = constrain(scrollOffset, 0, max(0, display.height() - SCREEN_HEIGHT));
-    displayAIResponse();  // Refresh display with updated scroll position
+    if (scrollOffset != previousOffset) {
+      displayAIResponse();
+      delay(5);
+    }
+    return;
   }
 
   // Handle cursor movement
@@ -172,10 +187,10 @@ void handleMPUInput(sensors_event_t a, sensors_event_t g) {
       cursorY--;
       if (cursorY < 0) cursorY = 0;
     }
-    if (a.acceleration.y < threshold) {
+    if (a.acceleration.y > threshold) {
       cursorX--;
       if (cursorX >= 10) cursorX = 9;
-    } else if (a.acceleration.y > -threshold) {
+    } else if (a.acceleration.y < -threshold) {
       cursorX++;
       if (cursorX < 0) cursorX = 0;
     }
