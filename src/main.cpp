@@ -7,17 +7,19 @@
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 
-// WiFi credentials
+// Define WiFi credentials
 const char* ssid = "Mahir";
 const char* password = "Ahnaf2007";
 
-// API Key and other constants
+// Define API Key and other constants
 const char* API_KEY = "AIzaSyCaepy-tFgUFmhAYcL1oXEGoynCdjMxtSo";
 const char* MAX_TOKENS = "100";
 
-// OLED display dimensions
+// Define OLED display dimensions
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
+
+// Create SH1106 display object
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire);
 
 // MPU6050 object for accelerometer
@@ -27,50 +29,44 @@ Adafruit_MPU6050 mpu;
 char keyboard[4][10] = {
   {'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'},
   {'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', '?'},
-  {'Z', 'X', 'C', 'V', 'B', 'N', 'M', ' ', '.', '/'},
+  {'Z', 'X', 'C', 'V', 'B', 'N', 'M', ' ', '.', '/'}, // ' ' represents space key
   {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'}
 };
 
-// Input text and cursor variables
+// Variables to store input text
 String inputText = "";  
+String aiResponse = "";  // Store AI response for scrolling
 int cursorX = 0;  
 int cursorY = 0;  
 int previousX = 0;
 int previousY = 0;
 
-// Button pins and states
+// Scroll position
+int scrollOffset = 0;
+
+// Button pin and states
 #define BUTTON_PIN_SELECT 23
 #define BUTTON_PIN_SEND 12
 bool buttonHeldSelect = false;
 bool buttonHeldSend = false;
+bool responseDisplayed = false;
 
-// AI response and scrolling variables
-String aiResponse = "";
-String responseLines[10];
-int numResponseLines = 0;
-int scrollOffset = 0;
-bool displayingAnswer = false;  // New variable to track answer display
-
-// WiFi setup with timeout
+// Initialize WiFi
 void initWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi...");
-  unsigned long startTime = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000) {
+  while (WiFi.status() != WL_CONNECTED) {
     Serial.print('.');
     delay(1000);
   }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("Failed to connect to WiFi.");
-  }
+  Serial.println(WiFi.localIP());
 }
 
-// Send text to Gemini API and store response
+// Send text to Gemini API and display response on OLED
 void sendToGeminiAPI(String userInput) {
   HTTPClient https;
+  
   if (https.begin("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + (String)API_KEY)) {
     https.addHeader("Content-Type", "application/json");
     
@@ -79,33 +75,39 @@ void sendToGeminiAPI(String userInput) {
 
     if (httpCode == HTTP_CODE_OK) {
       String response = https.getString();
-      DynamicJsonDocument doc(2048);  // Use DynamicJsonDocument instead of JsonDocument
-      if (deserializeJson(doc, response)) {
-        Serial.println("Failed to parse JSON");
-        return;
-      }
+      DynamicJsonDocument doc(2048);
+      deserializeJson(doc, response);
 
-      aiResponse = doc["candidates"][0]["content"]["parts"][0]["text"].as<String>();
-      numResponseLines = 0;
-      for (int i = 0; i < aiResponse.length(); i += 20) {
-        responseLines[numResponseLines++] = aiResponse.substring(i, i + 20);
-        if (numResponseLines >= 10) break;
-      }
-      scrollOffset = 0;
-      displayingAnswer = false;  // Do not display immediately
+      aiResponse = doc["candidates"][0]["content"].as<String>();
+      scrollOffset = 0;  // Reset scroll offset for new response
+
+      displayAIResponse();
+      responseDisplayed = true;
+      Serial.println("Gemini AI Response: " + aiResponse);
     } else {
-      Serial.printf("[HTTPS] POST failed, error: %s\n", https.errorToString(httpCode).c_str());
+      Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
     }
     https.end();
   } else {
-    Serial.println("[HTTPS] Unable to connect");
+    Serial.printf("[HTTPS] Unable to connect\n");
   }
+}
+
+// Display AI response with current scroll offset
+void displayAIResponse() {
+  display.clearDisplay();
+  display.setCursor(0, -scrollOffset);
+  display.setTextWrap(true);  // Allow text to wrap to next line
+  display.print("AI: ");
+  display.println(aiResponse);
+  display.display();
 }
 
 // Draw keyboard on the OLED
 void drawKeyboard() {
   int xOffset = 0;
   int yOffset = 20;
+
   for (int row = 0; row < 4; row++) {
     for (int col = 0; col < 10; col++) {
       display.setCursor(xOffset + col * 12, yOffset + row * 12); 
@@ -114,19 +116,25 @@ void drawKeyboard() {
   }
 }
 
-// Draw and clear the cursor
+// Draw the cursor at the specified position
 void drawCursor(int x, int y) {
   int cursorXPos = x * 12;
   int cursorYPos = 20 + y * 12;
+
   display.drawRect(cursorXPos, cursorYPos, 12, 12, SH110X_WHITE);
 }
+
+// Clear the cursor from its previous position
 void clearCursor(int x, int y) {
   int cursorXPos = x * 12;
   int cursorYPos = 20 + y * 12;
+
   display.fillRect(cursorXPos, cursorYPos, 12, 12, SH110X_BLACK);
   display.setCursor(cursorXPos, cursorYPos);
   display.print(keyboard[y][x]);
 }
+
+// Update the cursor visually
 void updateCursorPosition(int x, int y) {
   clearCursor(previousX, previousY);
   drawCursor(x, y);
@@ -135,79 +143,41 @@ void updateCursorPosition(int x, int y) {
   previousY = y;
 }
 
-void selectKey() {
-  char selectedKey = keyboard[cursorY][cursorX];
-  inputText += selectedKey;
-  display.clearDisplay();
-  display.fillRect(0, 0, SCREEN_WIDTH, 16, SH110X_BLACK);
-  display.setCursor(0, 0);
-  display.print("You: ");
-  display.print(inputText);
-  drawKeyboard();
-  drawCursor(cursorX, cursorY);
-  display.display();
-}
-
-void displayAIResponse() {
-  display.clearDisplay();
-  display.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SH110X_BLACK);
-  for (int i = 0; i < 4; i++) {
-    int lineIndex = scrollOffset + i;
-    if (lineIndex < numResponseLines) {
-      display.setCursor(0, i * 16);
-      display.print(responseLines[lineIndex]);
-    }
-  }
-  display.display();
-}
-
-// Add scrolling system with gyro sensor when displaying answer
-void handleGyroScrolling(sensors_event_t g) {
-  if (!displayingAnswer) return;
-
-  const float gyroThreshold = 4.5;  // Adjust as needed
-  static unsigned long lastGyroTime = 0;
-  const int gyroDelay = 200;  // Delay between scrolls in milliseconds
-
-  if (millis() - lastGyroTime > gyroDelay) {
-    if (g.gyro.z > gyroThreshold) {
-      scrollOffset++;
-      if (scrollOffset > numResponseLines - 4) scrollOffset = numResponseLines - 4;
-      displayAIResponse();
-      lastGyroTime = millis();
-    } else if (g.gyro.z < -gyroThreshold) {
-      scrollOffset--;
-      if (scrollOffset < 0) scrollOffset = 0;
-      displayAIResponse();
-      lastGyroTime = millis();
-    }
-  }
-}
-
-// Handle MPU6050 input for cursor movement
-void handleMPUInput(sensors_event_t a) {
-  if (displayingAnswer) return;
-
-  const float thresholdx = 3.5;
-  const float thresholdy = 4.5;
+// Handle MPU6050 input to move the cursor
+void handleMPUInput(sensors_event_t a, sensors_event_t g) {
+  const float threshold = 3.5;
   static unsigned long lastMoveTime = 0;
   const int moveDelay = 200;
 
+  // Handle scrolling for AI response
+  if (responseDisplayed) {
+    const float scrollThreshold = 5.0;  // Gyro sensitivity for scrolling
+
+    if (g.gyro.z > scrollThreshold) {  // Scroll down
+      scrollOffset += 10;
+    } else if (g.gyro.z < -scrollThreshold) {  // Scroll up
+      scrollOffset -= 10;
+    }
+
+    scrollOffset = constrain(scrollOffset, 0, max(0, display.height() - SCREEN_HEIGHT));
+    displayAIResponse();  // Refresh display with updated scroll position
+  }
+
+  // Handle cursor movement
   if (millis() - lastMoveTime > moveDelay) {
-    if (a.acceleration.x < thresholdx) {
-      cursorY--;
-      if (cursorY < 0) cursorY = 0;
-    } else if (a.acceleration.x > -thresholdx) {
+    if (a.acceleration.x > threshold) {
       cursorY++;
       if (cursorY >= 4) cursorY = 3;
+    } else if (a.acceleration.x < -threshold) {
+      cursorY--;
+      if (cursorY < 0) cursorY = 0;
     }
-    
-    if (a.acceleration.y > thresholdy) {
+    if (a.acceleration.y < threshold) {
       cursorX--;
-      if (cursorX < 0) cursorX = 0;
-    } else if (a.acceleration.y < -thresholdy) {
-      cursorX++;
       if (cursorX >= 10) cursorX = 9;
+    } else if (a.acceleration.y > -threshold) {
+      cursorX++;
+      if (cursorX < 0) cursorX = 0;
     }
 
     if (cursorX != previousX || cursorY != previousY) {
@@ -217,50 +187,57 @@ void handleMPUInput(sensors_event_t a) {
   }
 }
 
-// Handle button inputs
+// Select the key under the cursor
+void selectKey() {
+  char selectedKey = keyboard[cursorY][cursorX];
+  inputText += selectedKey;
+
+  display.fillRect(0, 0, SCREEN_WIDTH, 16, SH110X_BLACK);
+  display.setCursor(0, 0);
+  display.print("You: ");
+  display.print(inputText);
+  display.display();
+}
+
+// Handle button presses
 void checkButtons() {
   bool selectButtonState = digitalRead(BUTTON_PIN_SELECT);
   bool sendButtonState = digitalRead(BUTTON_PIN_SEND);
-  
+
+  if (responseDisplayed && (selectButtonState == HIGH || sendButtonState == HIGH)) {
+    // Clear response if a button is pressed after response is shown
+    responseDisplayed = false;
+    inputText = "";  
+    display.clearDisplay();
+    drawKeyboard();
+    drawCursor(cursorX, cursorY); 
+  }
+
   if (selectButtonState == HIGH && !buttonHeldSelect) {
     buttonHeldSelect = true;
-    selectKey();
+    selectKey();  
   } else if (selectButtonState == LOW) {
     buttonHeldSelect = false;
   }
 
-  // Only send the prompt if BUTTON_PIN_SEND is released
   if (sendButtonState == HIGH && !buttonHeldSend) {
     buttonHeldSend = true;
     
-    // Check if there's a response available to display or if inputText is ready to send
-    if (aiResponse.length() > 0) {
-      displayingAnswer = true;
-      displayAIResponse();
-    } else if (inputText.length() > 0 && digitalRead(BUTTON_PIN_SEND) == LOW) {  // Ensure button is not pressed
-      sendToGeminiAPI(inputText);  // Send input to Gemini API only if button is released
+    if (inputText.length() > 0) {
+      sendToGeminiAPI(inputText);
       inputText = "";  
     }
-  } else if (sendButtonState == LOW && buttonHeldSend) {
+  } else if (sendButtonState == LOW) {
     buttonHeldSend = false;
-    displayingAnswer = false;
-
-    // Redraw keyboard interface when answer display ends
-    display.clearDisplay();
-    display.fillRect(0, 0, SCREEN_WIDTH, 16, SH110X_BLACK);
-    display.setCursor(0, 0);
-    display.print("You: ");
-    display.print(inputText);
-    drawKeyboard();
-    drawCursor(cursorX, cursorY);
-    display.display();
   }
 }
 
 void setup() {
   Serial.begin(9600);
+
   pinMode(BUTTON_PIN_SELECT, INPUT_PULLUP);
   pinMode(BUTTON_PIN_SEND, INPUT_PULLUP);
+
   initWiFi();
 
   if (!display.begin(0x3C, true)) {
@@ -277,9 +254,9 @@ void setup() {
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
 
+  display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SH110X_WHITE);
-  display.clearDisplay();
 
   drawKeyboard();
   drawCursor(cursorX, cursorY);
@@ -289,12 +266,8 @@ void loop() {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
-  if (displayingAnswer) {
-    handleGyroScrolling(g);
-  } else {
-    handleMPUInput(a);
-    checkButtons();
-  }
+  handleMPUInput(a, g);
+  checkButtons();
 
   delay(100);  
 }
