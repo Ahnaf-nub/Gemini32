@@ -7,14 +7,11 @@
 #include <Adafruit_SH110X.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
-
-// Define WiFi credentials
-const char* ssid = "Mahir";
-const char* password = "Ahnaf2007";
+#include <WiFiManager.h> 
 
 // Define API Key and other constants
 const char* API_KEY = "AIzaSyCaepy-tFgUFmhAYcL1oXEGoynCdjMxtSo";
-const char* MAX_TOKENS = "100";
+const char* MAX_TOKENS = "120";
 
 // Define OLED display dimensions
 #define SCREEN_WIDTH 128
@@ -53,15 +50,11 @@ bool buttonHeldSelect = false;
 bool buttonHeldSend = false;
 bool responseDisplayed = false;
 
-// Initialize WiFi
+// Initialize WiFi using WiFiManager
 void initWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi...");
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print('.');
-    delay(1000);
-  }
+  WiFiManager wifiManager;
+  wifiManager.autoConnect("AutoConnectAP");
+  Serial.println("Connected to WiFi!");
   Serial.println(WiFi.localIP());
 }
 
@@ -160,7 +153,7 @@ void handleMPUInput(sensors_event_t a, sensors_event_t g) {
   const int moveDelay = 200;
 
   if (responseDisplayed) {
-    const float scrollThreshold = 0.2;
+    const float scrollThreshold = 0.02;
 
     // Track if the scrollOffset changes to trigger a display update
     int previousOffset = scrollOffset;
