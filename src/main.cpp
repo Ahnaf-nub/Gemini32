@@ -53,9 +53,15 @@ bool responseDisplayed = false;
 // Initialize WiFi using WiFiManager
 void initWiFi() {
   WiFiManager wifiManager;
-  wifiManager.autoConnect("AutoConnectAP");
+  wifiManager.autoConnect("Gemini32");
   Serial.println("Connected to WiFi!");
   Serial.println(WiFi.localIP());
+
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print("To connect to WiFi Go to ");
+  display.println(WiFi.localIP());
+  display.display();
 }
 
 void displayAIResponse() {
@@ -246,8 +252,6 @@ void setup() {
   pinMode(BUTTON_PIN_SELECT, INPUT_PULLUP);
   pinMode(BUTTON_PIN_SEND, INPUT_PULLUP);
 
-  initWiFi();
-
   if (!display.begin(0x3C, true)) {
     Serial.println("Display initialization failed!");
     while (1);
@@ -262,10 +266,11 @@ void setup() {
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
 
-  display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SH110X_WHITE);
 
+  initWiFi();
+  display.clearDisplay();
   drawKeyboard();
   drawCursor(cursorX, cursorY);
 }
