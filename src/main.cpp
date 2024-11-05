@@ -54,9 +54,6 @@ bool responseDisplayed = false;
 void initWiFi() {
   WiFiManager wifiManager;
   wifiManager.autoConnect("Gemini32");
-  Serial.println("Connected to WiFi!");
-  Serial.println(WiFi.localIP());
-
   display.clearDisplay();
   display.setCursor(0, 0);
   display.print("To connect to WiFi Go to ");
