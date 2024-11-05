@@ -57,6 +57,7 @@ void initWiFi() {
   display.clearDisplay();
   display.setCursor(0, 0);
   display.print("To connect to WiFi Go to ");
+  display.setCursor(0, 10);
   display.println(WiFi.localIP());
   display.display();
 }
@@ -156,15 +157,16 @@ void handleMPUInput(sensors_event_t a, sensors_event_t g) {
   const int moveDelay = 200;
 
   if (responseDisplayed) {
-    const float scrollThreshold = 0.02;
-
     // Track if the scrollOffset changes to trigger a display update
     int previousOffset = scrollOffset;
 
-    if (g.gyro.z > scrollThreshold) {
-      scrollOffset += 20;
-    } else if (g.gyro.z < -scrollThreshold) {
-      scrollOffset -= 20;
+    // Calculate the angle of rotation around the Z-axis
+    float angle = atan2(g.gyro.y, g.gyro.x) * 180 / PI;
+
+    if (angle > 15) {
+      scrollOffset += 10;
+    } else if (angle < -15) {
+      scrollOffset -= 10;
     }
 
     if (scrollOffset != previousOffset) {
