@@ -163,9 +163,9 @@ void handleMPUInput(sensors_event_t a, sensors_event_t g) {
     // Calculate the angle of rotation around the Z-axis
     float angle = atan2(g.gyro.y, g.gyro.x) * 180 / PI;
 
-    if (angle > 15) {
+    if (angle > 150) {
       scrollOffset += 10;
-    } else if (angle < -15) {
+    } else if (angle < -150) {
       scrollOffset -= 10;
     }
 
