@@ -81,10 +81,16 @@ void displayAIResponse() {
   display.display();
 }
 
-// Send text to Gemini API and display response on OLED
 void sendToGeminiAPI(String userInput) {
   HTTPClient https;
-  
+
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setCursor(0, 20);
+  display.print("Cooking...");
+  display.display();
+  display.setTextSize(1);
+
   if (https.begin("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + (String)API_KEY)) {
     https.addHeader("Content-Type", "application/json");
     
@@ -163,10 +169,10 @@ void handleMPUInput(sensors_event_t a, sensors_event_t g) {
     // Calculate the angle of rotation around the Z-axis
     float angle = atan2(g.gyro.y, g.gyro.x) * 180 / PI;
 
-    if (angle > 150) {
-      scrollOffset += 10;
-    } else if (angle < -150) {
-      scrollOffset -= 10;
+    if (angle > 15) {
+      scrollOffset += 5;
+    } else if (angle < -15) {
+      scrollOffset -= 5;
     }
 
     if (scrollOffset != previousOffset) {
@@ -187,10 +193,10 @@ void handleMPUInput(sensors_event_t a, sensors_event_t g) {
     }
     if (a.acceleration.y > threshold) {
       cursorX--;
-      if (cursorX >= 10) cursorX = 9;
+      if (cursorX < 0) cursorX = 0;
     } else if (a.acceleration.y < -threshold) {
       cursorX++;
-      if (cursorX < 0) cursorX = 0;
+      if (cursorX >= 10) cursorX = 9;
     }
 
     if (cursorX != previousX || cursorY != previousY) {
